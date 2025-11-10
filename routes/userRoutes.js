@@ -9,13 +9,12 @@ router.post('/register', userController.register);
 router.post('/login', userController.login);
 router.get('/', userController.getAllUsers);
 router.get('/:id', userController.getUserById);
+router.put('/:id', verifyToken, userController.updateUser);
+router.delete('/:id', verifyToken, userController.deleteUser);
 
 router.post('/forgot-password', userController.forgotPassword);
 router.post('/reset-password/:token', userController.resetPassword);
 
-// Protected
-router.put('/:id', verifyToken, userController.updateUser);
-router.delete('/:id', verifyToken, userController.deleteUser);
 
 
 module.exports = router;

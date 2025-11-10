@@ -8,8 +8,7 @@ const Admin = sequelize.define('Admin', {
   },
   email: {
     type: DataTypes.STRING,
-    allowNull: false,
-    unique: true,
+    allowNull: false
   },
   password: {
     type: DataTypes.STRING,

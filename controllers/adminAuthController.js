@@ -2,7 +2,6 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const Admin = require('../models/adminModel');
 
-// Generate JWT Token
 const signToken = (admin) => {
     return jwt.sign(
         { id: admin.id, role: admin.role },
@@ -11,27 +10,22 @@ const signToken = (admin) => {
     );
 };
 
-// ✅ Admin Login Controller
 exports.loginAdmin = async (req, res) => {
     try {
         const { email, password } = req.body;
 
-        // Check if admin exists
         const admin = await Admin.findOne({ where: { email } });
         if (!admin) {
             return res.status(400).json({ success: false, message: 'Invalid email or password' });
         }
 
-        // Verify password
         const isMatch = await bcrypt.compare(password, admin.password);
         if (!isMatch) {
             return res.status(400).json({ success: false, message: 'Invalid email or password' });
         }
 
-        // Generate token
         const token = signToken(admin);
 
-        // Success response
         res.status(200).json({
             success: true,
             message: 'Login successful',

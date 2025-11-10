@@ -162,30 +162,34 @@ exports.forgotPassword = async (req, res) => {
     const user = await User.findOne({ where: { email } });
     if (!user) return sendResponse(res, 404, false, 'User not found');
 
-    // Generate reset token
+    // Generate token
     const token = crypto.randomBytes(32).toString('hex');
-    const expiry = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
+    const expiry = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
 
     await user.update({
       resetPasswordToken: token,
       resetPasswordExpires: expiry,
     });
 
-    const resetLink = `${process.env.BACKEND_URL}/reset-password/${token}`;
+    const resetLink = `${process.env.FRONTEND_URL || process.env.BACKEND_URL}/reset-password/${token}`;
 
-    // Send email
-    await transporter.sendMail({
-      from: `"Tradesman Travel App" <${process.env.SMTP_USER}>`,
-      to: email,
-      subject: 'Password Reset Request',
-      html: `
-        <p>Hello ${user.name || ''},</p>
-        <p>You requested to reset your password.</p>
-        <p>Click the link below to reset your password:</p>
-        <a href="${resetLink}" target="_blank">${resetLink}</a>
-        <p>This link will expire in 15 minutes.</p>
-      `,
-    });
+    // ✅ Send Email (or log if testing)
+    if (process.env.SMTP_USER && transporter) {
+      await transporter.sendMail({
+        from: `"Tradesman Travel App" <${process.env.SMTP_USER}>`,
+        to: email,
+        subject: 'Password Reset Request',
+        html: `
+          <p>Hello ${user.name || ''},</p>
+          <p>You requested to reset your password.</p>
+          <p>Click below to reset your password:</p>
+          <a href="${resetLink}" target="_blank">${resetLink}</a>
+          <p>This link expires in 15 minutes.</p>
+        `,
+      });
+    } else {
+      console.log('🔗 Password reset link (for testing):', resetLink);
+    }
 
     sendResponse(res, 200, true, 'Password reset link sent to your email');
   } catch (err) {
@@ -194,7 +198,7 @@ exports.forgotPassword = async (req, res) => {
   }
 };
 
-// Reset Password
+// 🔹 Reset Password
 exports.resetPassword = async (req, res) => {
   try {
     const { token } = req.params;
