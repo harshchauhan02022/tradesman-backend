@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const User = require('../models/userModel'); // ✅ Import User model
+const User = require("../models/User");
 
 exports.googleCallback = async (req, res) => {
   try {

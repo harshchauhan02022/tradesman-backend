@@ -1,16 +1,16 @@
-const User = require('../models/userModel');
+const User = require('../models/User');
+const TradesmanDetails = require("../models/TradesmanDetails");
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { Op } = require('sequelize');
 const crypto = require('crypto');
 const transporter = require('../config/email');
-require('dotenv').config({ path: './config/config.env' });
+require('dotenv').config();
 
 const sendResponse = (res, statusCode, success, message, data = null, error = null) => {
-  res.status(statusCode).json({ success, message, data, error });
+  return res.status(statusCode).json({ success, message, data, error });
 };
 
-// Generate Token
 const signToken = (user) => {
   return jwt.sign(
     { id: user.id, email: user.email },
@@ -19,22 +19,124 @@ const signToken = (user) => {
   );
 };
 
-// Register User
 exports.register = async (req, res) => {
   try {
-    const { name, email, mobile, password, role, tradeType, businessName, shortBio, licenseNumber, licenseExpiry, profileImage, licenseDocument } = req.body;
+    const {
+      name,
+      email,
+      mobile,
+      password,
+      role,
 
-    const existing = await User.findOne({ where: { email } });
-    if (existing) {
-      return res.status(400).json({ success: false, message: 'User already exists' });
+      // Tradesman-only fields
+      tradeType,
+      businessName,
+      shortBio,
+      licenseNumber,
+      licenseExpiry,
+      licenseDocument,
+    } = req.body;
+
+    // Check existing user
+    const isExist = await User.findOne({ where: { email } });
+    if (isExist) {
+      return sendResponse(res, 400, false, "User already exists");
     }
 
-    const hashed = await bcrypt.hash(password, 10);
+    // Hash password
+    const hashedPass = await bcrypt.hash(password, 10);
+
+    // Create user in Users table
     const user = await User.create({
       name,
       email,
       mobile,
-      password: hashed,
+      password: hashedPass,
+      role,
+    });
+
+    // If Tradesman => Create TradesmanDetails row
+    if (role === "tradesman") {
+      await TradesmanDetails.create({
+        userId: user.id,
+        tradeType,
+        businessName,
+        shortBio,
+        licenseNumber,
+        licenseExpiry,
+        licenseDocument,
+      });
+    }
+
+    return sendResponse(res, 201, true, "User registered successfully", user);
+
+  } catch (error) {
+    console.error("Register Error:", error);
+    return sendResponse(res, 500, false, "Server error");
+  }
+};
+
+exports.login = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    const user = await User.findOne({ where: { email } });
+    if (!user) return sendResponse(res, 400, false, "Invalid email or password");
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) return sendResponse(res, 400, false, "Invalid email or password");
+
+    const token = signToken(user);
+
+    return sendResponse(res, 200, true, "Login successful", {
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      }
+    });
+
+  } catch (error) {
+    console.error("Login Error:", error);
+    return sendResponse(res, 500, false, "Server error");
+  }
+};
+
+exports.getAllUsers = async (req, res) => {
+  try {
+    const users = await User.findAll();
+    return sendResponse(res, 200, true, "Users fetched", users);
+  } catch (error) {
+    console.error("Fetch Users Error:", error);
+    return sendResponse(res, 500, false, "Server error");
+  }
+};
+
+exports.getUserById = async (req, res) => {
+  try {
+    const user = await User.findOne({
+      where: { id: req.params.id },
+      include: [{ model: TradesmanDetails, as: "TradesmanDetail" }],
+    });
+
+    if (!user) return sendResponse(res, 404, false, "User not found");
+
+    return sendResponse(res, 200, true, "User fetched", user);
+  } catch (error) {
+    console.error("Fetch User Error:", error);
+    return sendResponse(res, 500, false, "Server error");
+  }
+};
+
+exports.updateUser = async (req, res) => {
+  try {
+    const {
+      name,
+      email,
+      mobile,
+      password,
       role,
       tradeType,
       businessName,
@@ -42,278 +144,179 @@ exports.register = async (req, res) => {
       licenseNumber,
       licenseExpiry,
       profileImage,
-      licenseDocument
-    });
+      licenseDocument,
+      isApproved
+    } = req.body;
 
-    res.status(201).json({ success: true, message: 'User registered successfully', user });
-  } catch (error) {
-    console.error('Register error:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
-  }
-};
-
-// Login User
-exports.login = async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    const user = await User.findOne({ where: { email } });
-
-    if (!user) return res.status(400).json({ success: false, message: 'Invalid email or password' });
-
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ success: false, message: 'Invalid email or password' });
-
-    const token = signToken(user);
-
-    res.status(200).json({
-      success: true,
-      message: 'Login successful',
-      token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
-    });
-  } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
-  }
-};
-
-// Get All Users
-exports.getAllUsers = async (req, res) => {
-  try {
-    const users = await User.findAll();
-    res.status(200).json({ success: true, users });
-  } catch (error) {
-    console.error('Fetch users error:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
-  }
-};
-
-// Get User by ID
-exports.getUserById = async (req, res) => {
-  try {
     const user = await User.findByPk(req.params.id);
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    res.status(200).json({ success: true, user });
-  } catch (error) {
-    console.error('Fetch user error:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
-  }
-};
+    if (!user) return sendResponse(res, 404, false, "User not found");
 
-// Update User
-exports.updateUser = async (req, res) => {
-  try {
-    const { name, email, mobile, password, role, tradeType, businessName, shortBio, licenseNumber, licenseExpiry, profileImage, licenseDocument, isApproved } = req.body;
-    const user = await User.findByPk(req.params.id);
+    // Update Users table
+    user.name = name || user.name;
+    user.email = email || user.email;
+    user.mobile = mobile || user.mobile;
+    user.role = role || user.role;
+    user.profileImage = profileImage || user.profileImage;
 
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-
-    if (password) user.password = await bcrypt.hash(password, 10);
-
-    Object.assign(user, {
-      name: name || user.name,
-      email: email || user.email,
-      mobile: mobile || user.mobile,
-      role: role || user.role,
-      tradeType: tradeType || user.tradeType,
-      businessName: businessName || user.businessName,
-      shortBio: shortBio || user.shortBio,
-      licenseNumber: licenseNumber || user.licenseNumber,
-      licenseExpiry: licenseExpiry || user.licenseExpiry,
-      profileImage: profileImage || user.profileImage,
-      licenseDocument: licenseDocument || user.licenseDocument,
-      isApproved: isApproved ?? user.isApproved,
-    });
+    if (password) {
+      user.password = await bcrypt.hash(password, 10);
+    }
 
     await user.save();
-    res.status(200).json({ success: true, message: 'User updated successfully', user });
+
+    // Update tradesman table IF user is tradesman
+    let tradesman = await TradesmanDetails.findOne({ where: { userId: user.id } });
+
+    if (tradesman) {
+      tradesman.tradeType = tradeType || tradesman.tradeType;
+      tradesman.businessName = businessName || tradesman.businessName;
+      tradesman.shortBio = shortBio || tradesman.shortBio;
+      tradesman.licenseNumber = licenseNumber || tradesman.licenseNumber;
+      tradesman.licenseExpiry = licenseExpiry || tradesman.licenseExpiry;
+      tradesman.licenseDocument = licenseDocument || tradesman.licenseDocument;
+      tradesman.isApproved = isApproved ?? tradesman.isApproved;
+
+      await tradesman.save();
+    }
+
+    return sendResponse(res, 200, true, "User updated successfully", user);
+
   } catch (error) {
-    console.error('Update user error:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
+    console.error("Update Error:", error);
+    return sendResponse(res, 500, false, "Server error");
   }
 };
 
-// Delete User
 exports.deleteUser = async (req, res) => {
   try {
     const user = await User.findByPk(req.params.id);
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    if (!user) return sendResponse(res, 404, false, "User not found");
 
     await user.destroy();
-    res.status(200).json({ success: true, message: 'User deleted successfully' });
+    return sendResponse(res, 200, true, "User deleted successfully");
+
   } catch (error) {
-    console.error('Delete user error:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
+    console.error("Delete Error:", error);
+    return sendResponse(res, 500, false, "Server error");
   }
 };
 
-// Forgot Password
+exports.getAllTradesmen = async (req, res) => {
+  try {
+    const tradesmen = await User.findAll({
+      where: { role: "tradesman" },
+      include: [{ model: TradesmanDetails }],
+    });
+
+    if (tradesmen.length === 0)
+      return sendResponse(res, 404, false, "No tradesmen found");
+
+    return sendResponse(res, 200, true, "Tradesmen fetched", tradesmen);
+
+  } catch (error) {
+    console.error("Fetch Tradesmen Error:", error);
+    return sendResponse(res, 500, false, "Server error");
+  }
+};
+
+exports.getAllClients = async (req, res) => {
+  try {
+    const clients = await User.findAll({ where: { role: "client" } });
+
+    if (clients.length === 0)
+      return sendResponse(res, 404, false, "No clients found");
+
+    return sendResponse(res, 200, true, "Clients fetched", clients);
+
+  } catch (error) {
+    console.error("Fetch Clients Error:", error);
+    return sendResponse(res, 500, false, "Server error");
+  }
+};
+
 exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
 
-    if (!email) return sendResponse(res, 400, false, 'Email is required');
+    if (!email) return sendResponse(res, 400, false, "Email is required");
 
     const user = await User.findOne({ where: { email } });
-    if (!user) return sendResponse(res, 404, false, 'User not found');
+    if (!user) return sendResponse(res, 404, false, "User not found");
 
-    // Generate token
-    const token = crypto.randomBytes(32).toString('hex');
-    const expiry = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+    const token = crypto.randomBytes(32).toString("hex");
+    const expiry = new Date(Date.now() + 15 * 60 * 1000);
 
     await user.update({
       resetPasswordToken: token,
       resetPasswordExpires: expiry,
     });
 
-    const resetLink = `${process.env.FRONTEND_URL || process.env.BACKEND_URL}/reset-password/${token}`;
+    const resetLink = `${process.env.FRONTEND_URL}/reset-password/${token}`;
 
-    // ✅ Send Email (or log if testing)
-    if (process.env.SMTP_USER && transporter) {
-      await transporter.sendMail({
-        from: `"Tradesman Travel App" <${process.env.SMTP_USER}>`,
-        to: email,
-        subject: 'Password Reset Request',
-        html: `
-          <p>Hello ${user.name || ''},</p>
-          <p>You requested to reset your password.</p>
-          <p>Click below to reset your password:</p>
-          <a href="${resetLink}" target="_blank">${resetLink}</a>
-          <p>This link expires in 15 minutes.</p>
-        `,
-      });
-    } else {
-      console.log('🔗 Password reset link (for testing):', resetLink);
-    }
+    console.log("Reset Link:", resetLink);
 
-    sendResponse(res, 200, true, 'Password reset link sent to your email');
+    return sendResponse(res, 200, true, "Password reset link sent", resetLink);
+
   } catch (err) {
-    console.error('forgotPassword error:', err);
-    sendResponse(res, 500, false, 'Server error', null, err.message);
+    console.error("Forgot Error:", err);
+    return sendResponse(res, 500, false, "Server error");
   }
 };
 
-// 🔹 Reset Password
 exports.resetPassword = async (req, res) => {
   try {
     const { token } = req.params;
     const { newPassword } = req.body;
 
-    if (!newPassword)
-      return sendResponse(res, 400, false, 'New password is required');
-
     const user = await User.findOne({
       where: {
         resetPasswordToken: token,
-        resetPasswordExpires: { [Op.gt]: new Date() }, // token not expired
+        resetPasswordExpires: { [Op.gt]: new Date() },
       },
     });
 
-    if (!user)
-      return sendResponse(res, 400, false, 'Invalid or expired token');
+    if (!user) return sendResponse(res, 400, false, "Invalid or expired token");
 
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    const hashed = await bcrypt.hash(newPassword, 10);
 
     await user.update({
-      password: hashedPassword,
+      password: hashed,
       resetPasswordToken: null,
       resetPasswordExpires: null,
     });
 
-    sendResponse(res, 200, true, 'Password reset successfully');
-  } catch (err) {
-    console.error('resetPassword error:', err);
-    sendResponse(res, 500, false, 'Server error', null, err.message);
+    return sendResponse(res, 200, true, "Password reset successful");
+
+  } catch (error) {
+    console.error("Reset Error:", error);
+    return sendResponse(res, 500, false, "Server error");
   }
 };
 
 exports.changePassword = async (req, res) => {
   try {
-    const userId = req.user?.id; // verifyToken middleware se aa raha hai
+    const userId = req.user?.id;
     const { oldPassword, newPassword, confirmNewPassword } = req.body;
 
-    if (!userId) {
-      return res.status(401).json({ success: false, message: 'Unauthorized' });
-    }
+    if (!oldPassword || !newPassword || !confirmNewPassword)
+      return sendResponse(res, 400, false, "All fields required");
 
-    if (!oldPassword || !newPassword || !confirmNewPassword) {
-      return res.status(400).json({
-        success: false,
-        message: 'Old password, new password and confirm password are required'
-      });
-    }
-
-    if (newPassword !== confirmNewPassword) {
-      return res.status(400).json({
-        success: false,
-        message: 'New password and confirm password do not match'
-      });
-    }
+    if (newPassword !== confirmNewPassword)
+      return sendResponse(res, 400, false, "New password mismatch");
 
     const user = await User.findByPk(userId);
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
 
     const isMatch = await bcrypt.compare(oldPassword, user.password);
-    if (!isMatch) {
-      return res.status(400).json({ success: false, message: 'Old password is incorrect' });
-    }
+    if (!isMatch) return sendResponse(res, 400, false, "Old password incorrect");
 
-    const hashed = await bcrypt.hash(newPassword, 10);
-    user.password = hashed;
+    user.password = await bcrypt.hash(newPassword, 10);
     await user.save();
 
-    res.status(200).json({
-      success: true,
-      message: 'Password changed successfully'
-    });
+    return sendResponse(res, 200, true, "Password changed successfully");
+
   } catch (error) {
-    console.error('Change password error:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
+    console.error("Change Password Error:", error);
+    return sendResponse(res, 500, false, "Server error");
   }
 };
-
-exports.getAllTradesmen = async (req, res) => {
-  try {
-    const tradesmen = await User.findAll({ where: { role: 'tradesman' } });
-
-    if (!tradesmen || tradesmen.length === 0) {
-      return res.status(404).json({ success: false, message: 'No tradesmen found' });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: 'Tradesmen fetched successfully',
-      data: tradesmen
-    });
-  } catch (error) {
-    console.error('Get tradesmen error:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
-  }
-};
-
-exports.getAllClients = async (req, res) => {
-  try {
-    const clients = await User.findAll({ where: { role: 'client' } });
-
-    if (!clients || clients.length === 0) {
-      return res.status(404).json({ success: false, message: 'No clients found' });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: 'Clients fetched successfully',
-      data: clients
-    });
-  } catch (error) {
-    console.error('Get clients error:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
-  }
-};
-

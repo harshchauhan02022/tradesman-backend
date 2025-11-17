@@ -12,4 +12,5 @@ const Message = sequelize.define('Message', {
     timestamps: true
 });
 
+
 module.exports = Message;
