@@ -21,8 +21,12 @@ router.post('/login', userController.login);
 router.get('/tradesmen', userController.getAllTradesmen);
 router.get('/clients', userController.getAllClients);
 
+// 🔹 Token based current user profile
+router.get('/me', verifyToken, userController.getMeProfile);
+
+
 // 🔹 Protected Route for Change Password
-router.put('/change-password', verifyToken, userController.changePassword);
+router.put('/change-password', verifyToken, userController.changePassword); 
 
 // 🔹 Other CRUD routes
 router.get('/', userController.getAllUsers);

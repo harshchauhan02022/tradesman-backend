@@ -1,6 +1,6 @@
 // controllers/chatController.js
 const Message = require('../models/messageModel');
-const User = require('../models/userModel');
+const User = require('../models/User');
 const { Op } = require('sequelize');
 
 // POST /api/chat/send
@@ -60,6 +60,7 @@ exports.getConversation = async (req, res) => {
 };
 
 // GET /api/chat/list  -> last message with each user
+// GET /api/chat/list  -> conversations list (WhatsApp style)
 exports.getChatList = async (req, res) => {
   try {
     const userId = req.user?.id;
@@ -67,6 +68,7 @@ exports.getChatList = async (req, res) => {
       return res.status(401).json({ success: false, message: 'Unauthorized' });
     }
 
+    // sabhi messages jaha ye user sender ya receiver hai
     const msgs = await Message.findAll({
       where: {
         [Op.or]: [
@@ -74,29 +76,43 @@ exports.getChatList = async (req, res) => {
           { receiverId: userId }
         ]
       },
-      order: [['createdAt', 'DESC']]
+      order: [['createdAt', 'ASC']]   // ✅ oldest → newest
     });
 
+    // Map: otherUserId -> [messages...]
     const convMap = new Map();
 
     for (const m of msgs) {
-      const other = (m.senderId === userId) ? m.receiverId : m.senderId;
-      if (!convMap.has(other)) {
-        convMap.set(other, m); // first = latest (DESC order)
+      const otherId = (m.senderId === userId) ? m.receiverId : m.senderId;
+
+      if (!convMap.has(otherId)) {
+        convMap.set(otherId, []);
       }
+      convMap.get(otherId).push(m);   // array me add, order already ASC hai
     }
 
-    const chatList = [];
-    for (const [otherId, lastMsg] of convMap.entries()) {
+    let chatList = [];
+
+    for (const [otherId, messages] of convMap.entries()) {
       const otherUser = await User.findByPk(otherId, {
         attributes: ['id', 'name', 'email', 'role', 'profileImage']
       });
 
+      const lastMessage = messages[messages.length - 1]; // sabse naya
+
       chatList.push({
         withUser: otherUser || { id: otherId },
-        lastMessage: lastMsg
+        messages,      // ✅ chat screen me use kar sakte ho (latest niche)
+        lastMessage
       });
     }
+
+    // ✅ list ko latest conversation se sort karo (WhatsApp style)
+    chatList.sort((a, b) => {
+      const tA = new Date(a.lastMessage.createdAt).getTime();
+      const tB = new Date(b.lastMessage.createdAt).getTime();
+      return tB - tA;  // desc
+    });
 
     return res.status(200).json({ success: true, data: chatList });
   } catch (err) {
@@ -104,6 +120,7 @@ exports.getChatList = async (req, res) => {
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 };
+
 
 // PUT /api/chat/mark-read
 exports.markAsRead = async (req, res) => {

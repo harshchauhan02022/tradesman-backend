@@ -1,14 +1,20 @@
+// routes/locationRoutes.js
+
 const express = require("express");
 const router = express.Router();
-const travelPlanController = require("../controllers/travelPlanController");
+const travelPlanController = require("../controllers/locationController");
 const { verifyToken } = require("../middlewares/authMiddleware");
 
-// Home screen form
+// Create
 router.post("/", verifyToken, travelPlanController.createTravelPlan);
+
+// My travel plans
 router.get("/my", verifyToken, travelPlanController.getMyTravelPlans);
 
-// option: public listing
-// const { getAllTravelPlans } = travelPlanController;
-// router.get("/", getAllTravelPlans);
+// Update
+router.put("/:id", verifyToken, travelPlanController.updateTravelPlan);
+
+// Delete
+router.delete("/:id", verifyToken, travelPlanController.deleteTravelPlan);
 
 module.exports = router;

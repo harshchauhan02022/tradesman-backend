@@ -30,32 +30,66 @@ exports.register = async (req, res) => {
       password,
       role,              // "tradesman" | "client"
 
-      // Tradesman-only fields
+      // Tradesman-only text fields
       tradeType,
       businessName,
       shortBio,
       licenseNumber,
       licenseExpiry,
-      licenseDocument,
+      portfolioDescription,
     } = req.body;
 
+    // 👇 Files from multer
+    const profileImageFile = req.files?.profileImage?.[0] || null;
+    const licenseDocFile   = req.files?.licenseDocument?.[0] || null;
+    const portfolioFiles   = req.files?.portfolioPhotos || [];
+
+    // console.log for debug (chaho to rakh sakte ho)
+    // console.log('BODY ===>', req.body);
+    // console.log('FILES ===>', req.files);
+
+    // 1) Email already exist?
     const isExist = await User.findOne({ where: { email } });
     if (isExist) {
       return sendResponse(res, 400, false, "User already exists");
     }
 
+    // 2) Tradesman required fields + files
+    if (role === "tradesman") {
+      if (!tradeType || !businessName || !shortBio) {
+        return sendResponse(res, 400, false, "tradeType, businessName, shortBio required for tradesman");
+      }
+      if (!licenseNumber || !licenseExpiry) {
+        return sendResponse(res, 400, false, "licenseNumber & licenseExpiry required for tradesman");
+      }
+      if (!profileImageFile) {
+        return sendResponse(res, 400, false, "profileImage file is required for tradesman");
+      }
+      if (!licenseDocFile) {
+        return sendResponse(res, 400, false, "licenseDocument file is required for tradesman");
+      }
+      if (!portfolioFiles.length) {
+        return sendResponse(res, 400, false, "At least one portfolioPhotos file is required for tradesman");
+      }
+    }
+
+    // 3) Password hash
     const hashedPass = await bcrypt.hash(password, 10);
 
+    // 4) User create (profileImage = filename)
     const user = await User.create({
       name,
       email,
       mobile,
       password: hashedPass,
       role,
+      profileImage: profileImageFile ? profileImageFile.filename : null,
     });
 
-    // Tradesman details
+    // 5) TradesmanDetails create (licenseDocument + portfolioPhotos array)
     if (role === "tradesman") {
+      const portfolioPhotos = portfolioFiles.map((f) => f.filename);
+
       await TradesmanDetails.create({
         userId: user.id,
         tradeType,
@@ -63,10 +97,12 @@ exports.register = async (req, res) => {
         shortBio,
         licenseNumber,
         licenseExpiry,
-        licenseDocument,
+        licenseDocument: licenseDocFile.filename,
+        portfolioPhotos,
+        portfolioDescription,
       });
 
-      // 👉 default subscription: Free Trial
+      // 6) Default subscription: Free Trial
       const freePlan = await SubscriptionPlan.findOne({
         where: { isDefault: true },
       });
@@ -87,7 +123,6 @@ exports.register = async (req, res) => {
     return sendResponse(res, 500, false, "Server error");
   }
 };
-
 
 exports.login = async (req, res) => {
   try {
@@ -227,14 +262,19 @@ exports.getAllTradesmen = async (req, res) => {
   try {
     const tradesmen = await User.findAll({
       where: { role: "tradesman" },
-      include: [{ model: TradesmanDetails }],
+      include: [
+        {
+          model: TradesmanDetails,
+          as: "TradesmanDetail",   // 👈 IMPORTANT
+        },
+      ],
     });
 
-    if (tradesmen.length === 0)
+    if (!tradesmen || tradesmen.length === 0) {
       return sendResponse(res, 404, false, "No tradesmen found");
+    }
 
     return sendResponse(res, 200, true, "Tradesmen fetched", tradesmen);
-
   } catch (error) {
     console.error("Fetch Tradesmen Error:", error);
     return sendResponse(res, 500, false, "Server error");
@@ -338,6 +378,31 @@ exports.changePassword = async (req, res) => {
 
   } catch (error) {
     console.error("Change Password Error:", error);
+    return sendResponse(res, 500, false, "Server error");
+  }
+};
+
+// 👇 isko file ke beech me kahin add kar do
+exports.getMeProfile = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return sendResponse(res, 401, false, "Unauthorized");
+    }
+
+    const user = await User.findOne({
+      where: { id: userId },
+      include: [{ model: TradesmanDetails, as: "TradesmanDetail" }],
+    });
+
+    if (!user) {
+      return sendResponse(res, 404, false, "User not found");
+    }
+
+    return sendResponse(res, 200, true, "User fetched", user);
+  } catch (error) {
+    console.error("Fetch Me Error:", error);
     return sendResponse(res, 500, false, "Server error");
   }
 };

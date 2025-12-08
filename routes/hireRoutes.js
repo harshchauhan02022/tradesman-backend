@@ -10,10 +10,19 @@ router.post('/request', verifyToken, hireController.requestHire);
 // Tradesman → accept / reject
 router.post('/respond', verifyToken, hireController.respondHire);
 
-// Client → mark as completed
+// Client → mark job as completed
 router.post('/complete', verifyToken, hireController.completeHire);
 
-// Get current/latest hire status between me & other user (for chat screen)
+// Chat screen → latest hire status between me & other user
 router.get('/status/:userId', verifyToken, hireController.getHireStatusForConversation);
+
+// Booking tab → my jobs list (client or tradesman)
+router.get('/my', verifyToken, hireController.getMyJobs);
+
+// Rate Your Experience → create review
+router.post('/review', verifyToken, hireController.createReviewForJob);
+
+// Tradesman profile → reviews + avg rating
+router.get('/reviews/:tradesmanId', hireController.getReviewsForTradesman);
 
 module.exports = router;

@@ -1,4 +1,4 @@
-// models/TravelPlan.js
+// models/locationModel.js
 const { DataTypes } = require("sequelize");
 const sequelize = require("../config/db");
 const User = require("./User");
@@ -44,7 +44,7 @@ const TravelPlan = sequelize.define(
     },
 
     stops: {
-      type: DataTypes.JSON, // ["Stop 1","Stop 2"]
+      type: DataTypes.JSON,
       allowNull: true,
     },
 

@@ -22,24 +22,24 @@ const Hire = sequelize.define('Hire', {
     references: { model: User, key: 'id' }
   },
 
-  // pending -> accepted -> completed  (ya rejected/cancelled)
   status: {
     type: DataTypes.ENUM('pending', 'accepted', 'rejected', 'completed', 'cancelled'),
     defaultValue: 'pending'
   },
 
-  // optional extra info (job detail etc.)
   jobDescription: {
     type: DataTypes.TEXT,
     allowNull: true
   }
 }, {
-  tableName: 'hires',   // phpMyAdmin me jo table ka naam hai, wahi rakho
+  tableName: 'hires',
   timestamps: true
 });
 
-// (optional associations)
 Hire.belongsTo(User, { as: 'client', foreignKey: 'clientId' });
 Hire.belongsTo(User, { as: 'tradesman', foreignKey: 'tradesmanId' });
+
+User.hasMany(Hire, { as: 'clientJobs', foreignKey: 'clientId' });
+User.hasMany(Hire, { as: 'tradesmanJobs', foreignKey: 'tradesmanId' });
 
 module.exports = Hire;
