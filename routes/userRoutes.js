@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const userController = require('../controllers/userController');
 const { verifyToken } = require('../middlewares/authMiddleware');
-const upload = require('../middlewares/uploadMiddleware');
+const { upload, convertToJpg } = require('../middlewares/uploadMiddleware');
 
 // Public Routes
 router.post(
@@ -12,6 +12,7 @@ router.post(
     { name: 'licenseDocument', maxCount: 1 },
     { name: 'portfolioPhotos', maxCount: 10 },
   ]),
+  convertToJpg,
   userController.register
 );
 
@@ -30,12 +31,18 @@ router.get('/profile/:id', userController.getFullUserProfile);
 router.get('/me', verifyToken, userController.getMeProfile);
 
 // 🔹 Protected Route for Change Password
-router.put('/change-password', verifyToken, userController.changePassword); 
+router.put('/change-password', verifyToken, userController.changePassword);
 
 // 🔹 Other CRUD routes (getAllUsers supports pagination & search)
 router.get('/', userController.getAllUsers);
 router.get('/:id', userController.getUserById);
-router.put('/:id', verifyToken, userController.updateUser);
+router.put(
+  "/profile",
+  verifyToken,
+  upload.single("profileImage"),
+  convertToJpg,
+  userController.updateProfile
+);
 router.delete('/:id', verifyToken, userController.deleteUser);
 
 // 🔹 Password Reset

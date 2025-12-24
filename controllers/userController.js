@@ -337,59 +337,69 @@ exports.getUserById = async (req, res) => {
   }
 };
 
-exports.updateUser = async (req, res) => {
+exports.updateProfile = async (req, res) => {
   try {
+    const userId = req.user.id; // 🔥 TOKEN SE ID
+
+    const user = await User.findByPk(userId);
+    if (!user)
+      return sendResponse(res, 404, false, "User not found");
+
     const {
       name,
       email,
       mobile,
       password,
-      role,
       tradeType,
       businessName,
       shortBio,
       licenseNumber,
       licenseExpiry,
-      profileImage,
-      licenseDocument,
       isApproved
     } = req.body;
 
-    const user = await User.findByPk(req.params.id);
-    if (!user) return sendResponse(res, 404, false, "User not found");
-
-    // Update Users table
-    user.name = name || user.name;
-    user.email = email || user.email;
-    user.mobile = mobile || user.mobile;
-    user.role = role || user.role;
-    user.profileImage = profileImage || user.profileImage;
+    // -------- USERS TABLE (OPTIONAL FIELDS) --------
+    if (name !== undefined) user.name = name;
+    if (email !== undefined) user.email = email;
+    if (mobile !== undefined) user.mobile = mobile;
 
     if (password) {
       user.password = await bcrypt.hash(password, 10);
     }
 
+    // 🖼 PROFILE IMAGE (OPTIONAL)
+    if (req.file) {
+      user.profileImage = `${req.file.filename}`;
+    }
+
     await user.save();
 
-    // Update tradesman table IF user is tradesman
-    let tradesman = await TradesmanDetails.findOne({ where: { userId: user.id } });
+    // -------- TRADESMAN DETAILS (IF EXISTS) --------
+    const tradesman = await TradesmanDetails.findOne({
+      where: { userId }
+    });
 
     if (tradesman) {
-      tradesman.tradeType = tradeType || tradesman.tradeType;
-      tradesman.businessName = businessName || tradesman.businessName;
-      tradesman.shortBio = shortBio || tradesman.shortBio;
-      tradesman.licenseNumber = licenseNumber || tradesman.licenseNumber;
-      tradesman.licenseExpiry = licenseExpiry || tradesman.licenseExpiry;
-      tradesman.licenseDocument = licenseDocument || tradesman.licenseDocument;
-      tradesman.isApproved = isApproved ?? tradesman.isApproved;
+      if (tradeType !== undefined) tradesman.tradeType = tradeType;
+      if (businessName !== undefined) tradesman.businessName = businessName;
+      if (shortBio !== undefined) tradesman.shortBio = shortBio;
+      if (licenseNumber !== undefined) tradesman.licenseNumber = licenseNumber;
+      if (licenseExpiry !== undefined) tradesman.licenseExpiry = licenseExpiry;
+      if (isApproved !== undefined) tradesman.isApproved = isApproved;
 
       await tradesman.save();
     }
 
-    return sendResponse(res, 200, true, "User updated successfully", user);
+    return sendResponse(res, 200, true, "Profile updated successfully", {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      mobile: user.mobile,
+      profileImage: user.profileImage
+    });
 
   } catch (error) {
-    console.error("Update Error:", error);
+    console.error("Update Profile Error:", error);
     return sendResponse(res, 500, false, "Server error");
   }
 };
