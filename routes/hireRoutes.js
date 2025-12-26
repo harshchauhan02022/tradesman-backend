@@ -29,5 +29,7 @@ router.get("/my", verifyToken, hireController.getMyJobs);
 router.get("/client/bookings", verifyToken, clientBookingController.getClientBookings);
 
 router.post("/review", verifyToken, reviewController.addReview);
+router.get("/review/pending", verifyToken, reviewController.getPendingReviews);
+
 
 module.exports = router;

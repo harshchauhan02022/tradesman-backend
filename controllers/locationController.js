@@ -3,12 +3,19 @@ const User = require("../models/User");
 const SubscriptionPlan = require("../models/SubscriptionPlan");
 const UserSubscription = require("../models/UserSubscription");
 const Review = require("../models/reviewModel");
-const { Op, fn, col } = require("sequelize"); // ✅ FIXED
+const { Op, fn, col } = require("sequelize");
 
+// ================= RESPONSE HELPER =================
 const sendResponse = (res, statusCode, success, message, data = null) =>
   res.status(statusCode).json({ success, message, data });
 
-// ================= Helper =================
+// ================= SUBSCRIPTION HELPER =================
+async function getActivePlanForUser(userId) {
+  return await UserSubscription.findOne({
+    where: { userId, status: "active" },
+    include: [{ model: SubscriptionPlan, as: "plan" }],
+  });
+}
 async function getActivePlanForUser(userId) {
   return await UserSubscription.findOne({
     where: { userId, status: "active" },
@@ -16,20 +23,20 @@ async function getActivePlanForUser(userId) {
   });
 }
 
+// ================= STOPS PARSER =================
 function parseStops(stops) {
   if (!stops) return null;
 
   let arr = Array.isArray(stops)
     ? stops
     : typeof stops === "string"
-    ? stops.split(",").map(s => s.trim())
-    : null;
+      ? stops.split(",").map((s) => s.trim())
+      : null;
 
   if (!arr || !arr.length) return null;
   return arr.slice(0, 4);
 }
 
-// ================= CREATE =================
 exports.createTravelPlan = async (req, res) => {
   try {
     const { id: userId, role } = req.user;
@@ -48,18 +55,26 @@ exports.createTravelPlan = async (req, res) => {
       endDate,
     } = req.body;
 
-    if (!startLocation || !destination)
-      return sendResponse(res, 400, false, "startLocation & destination required");
+    if (!startLocation || !destination || !startDate || !endDate)
+      return sendResponse(res, 400, false, "All fields required");
 
-    const activeSub = await getActivePlanForUser(userId);
-    if (!activeSub)
-      return sendResponse(res, 403, false, "Subscription required");
+    // 🔒 Overlapping / active plan check
+    const overlapPlan = await TravelPlan.findOne({
+      where: {
+        tradesmanId: userId,
+        status: "open",
+        startDate: { [Op.lte]: endDate },
+        endDate: { [Op.gte]: startDate },
+      },
+    });
 
-    const maxShared = activeSub.plan.maxSharedLocations;
-    if (maxShared !== null) {
-      const count = await TravelPlan.count({ where: { tradesmanId: userId } });
-      if (count >= maxShared)
-        return sendResponse(res, 403, false, "Plan limit reached");
+    if (overlapPlan) {
+      return sendResponse(
+        res,
+        400,
+        false,
+        "Active travel plan already exists for this period"
+      );
     }
 
     const plan = await TravelPlan.create({
@@ -72,33 +87,44 @@ exports.createTravelPlan = async (req, res) => {
       stops: parseStops(stops),
       startDate,
       endDate,
+      status: "open",
     });
 
     return sendResponse(res, 201, true, "Travel plan created", plan);
   } catch (err) {
+    // 🔥 Handle DB unique constraint error
+    if (err.name === "SequelizeUniqueConstraintError") {
+      return sendResponse(
+        res,
+        400,
+        false,
+        "You already have an active travel plan"
+      );
+    }
+
     console.error(err);
     return sendResponse(res, 500, false, "Server error");
   }
 };
 
-// ================= MY PLANS =================
 exports.getMyTravelPlans = async (req, res) => {
   try {
     const plans = await TravelPlan.findAll({
       where: { tradesmanId: req.user.id },
       order: [["createdAt", "DESC"]],
     });
+
     return sendResponse(res, 200, true, "My plans", plans);
   } catch (err) {
     return sendResponse(res, 500, false, "Server error");
   }
 };
 
-// ================= UPDATE =================
 exports.updateTravelPlan = async (req, res) => {
   try {
     const plan = await TravelPlan.findByPk(req.params.id);
     if (!plan) return sendResponse(res, 404, false, "Plan not found");
+
     if (plan.tradesmanId !== req.user.id)
       return sendResponse(res, 403, false, "Not allowed");
 
@@ -112,11 +138,11 @@ exports.updateTravelPlan = async (req, res) => {
   }
 };
 
-// ================= DELETE =================
 exports.deleteTravelPlan = async (req, res) => {
   try {
     const plan = await TravelPlan.findByPk(req.params.id);
     if (!plan) return sendResponse(res, 404, false, "Plan not found");
+
     if (plan.tradesmanId !== req.user.id)
       return sendResponse(res, 403, false, "Not allowed");
 
@@ -127,7 +153,6 @@ exports.deleteTravelPlan = async (req, res) => {
   }
 };
 
-// ================= TRADESMAN PROFILE =================
 exports.getTradesmanProfile = async (req, res) => {
   try {
     const { tradesmanId } = req.params;
@@ -141,8 +166,12 @@ exports.getTradesmanProfile = async (req, res) => {
       return sendResponse(res, 404, false, "Tradesman not found");
 
     const travelPlan = await TravelPlan.findOne({
-      where: { tradesmanId, status: "open" },
-      order: [["createdAt", "DESC"]],
+      where: {
+        tradesmanId,
+        status: "open",
+        endDate: { [Op.gte]: new Date() } // ✅ only endDate check
+      },
+      order: [["startDate", "ASC"]],
     });
 
     const ratingAgg = await Review.findOne({
@@ -158,30 +187,36 @@ exports.getTradesmanProfile = async (req, res) => {
       id: tradesman.id,
       name: tradesman.name,
       profileImage: tradesman.profileImage,
-    
+
       rating: ratingAgg?.avgRating
         ? Number(ratingAgg.avgRating).toFixed(1)
         : "0.0",
-    
+
       reviewCount: ratingAgg?.reviewCount || 0,
-    
+
       location: travelPlan
         ? {
-            current: travelPlan.currentLocation || null,
+            current: travelPlan.currentLocation,
             start: travelPlan.startLocation,
             destination: travelPlan.destination,
-            stops: travelPlan.allowStops ? travelPlan.stops : []
+            stops: travelPlan.allowStops ? travelPlan.stops : [],
+            startDate: travelPlan.startDate,
+            endDate: travelPlan.endDate,
+            status:
+              new Date() < travelPlan.startDate
+                ? "Upcoming"
+                : "Active",
           }
         : null,
-    
-      availability: travelPlan ? "Available Today" : "Not Available",
-      priceRange: travelPlan?.priceRange || null
+
+      availability: travelPlan ? "Available" : "Not Available",
+      priceRange: travelPlan?.priceRange || null,
     };
-    
 
     return sendResponse(res, 200, true, "Profile fetched", response);
   } catch (err) {
-    console.error("getTradesmanProfile error:", err);
+    console.error(err);
     return sendResponse(res, 500, false, "Server error");
   }
 };
+
